@@ -1,0 +1,219 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>MotorIntel Air Combat 2D - Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; background: #020617; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Outfit', sans-serif; overflow: hidden; }
+        .container { background: #0f172a; padding: 25px; border-radius: 30px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; color: white; border: 1px solid #1e293b; position: relative; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .brand { font-weight: 700; color: #3b82f6; font-size: 20px; }
+        .badge { font-size: 10px; border: 1px solid #3b82f6; padding: 2px 6px; border-radius: 6px; margin-left: 5px; vertical-align: middle; }
+        .bar-container { width: 400px; height: 10px; background: #1e293b; border-radius: 10px; margin-bottom: 8px; overflow: hidden; position: relative; }
+        #fuelBar { width: 100%; height: 100%; background: #22c55e; transition: width 0.1s; }
+        #bossBarContainer { display: none; margin-top: 5px; background: #450a0a; }
+        #bossBar { width: 100%; height: 100%; background: #ef4444; }
+        canvas { background: linear-gradient(#075985, #7dd3fc); border-radius: 15px; cursor: crosshair; }
+        
+        /* Menús */
+        #menu, #gameOverScreen { position: absolute; top: 95px; left: 25px; width: 400px; height: 500px; background: rgba(15,23,42,0.95); border-radius: 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 20; }
+        #gameOverScreen { display: none; }
+        
+        .btn-start { background: #3b82f6; color: white; border: none; padding: 15px 40px; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 1.2rem; transition: 0.3s; }
+        .btn-start:hover { background: #2563eb; transform: scale(1.05); }
+        .stats-row { display: flex; justify-content: space-between; width: 100%; font-size: 14px; color: #94a3b8; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="brand">MotorIntel<span class="badge">AIR COMBAT 2D</span></div>
+            <div id="levelDisplay" style="color:#3b82f6; font-weight:700">NOVATO</div>
+        </div>
+        
+        <div class="stats-row">
+            <span id="scoreDisplay">SCORE: 0</span>
+            <span id="highScoreDisplay" style="color:#facc15">RECORD: 0</span>
+            <span>GASOLINA</span>
+        </div>
+        
+        <div class="bar-container"><div id="fuelBar"></div></div>
+        <div id="bossBarContainer" class="bar-container"><div id="bossBar"></div></div>
+
+        <div id="menu">
+            <h1 style="color:#3b82f6">OPERACIÓN 2D</h1>
+            <p style="color:#94a3b8; padding: 0 40px">Protege el espacio aéreo. Recoge combustible dorado.</p>
+            <button class="btn-start" onclick="startGame()">DESPEGAR</button>
+        </div>
+
+        <div id="gameOverScreen">
+            <h1 id="gameOverTitle" style="color:#ef4444">¡MISIÓN FALLIDA!</h1>
+            <p id="finalScore" style="font-size: 1.5rem; margin: 10px 0;">Puntos: 0</p>
+            <p id="recordMsg" style="color:#facc15; margin-bottom: 20px;"></p>
+            <button class="btn-start" onclick="location.reload()">REINTENTAR</button>
+        </div>
+
+        <canvas id="gameCanvas" width="400" height="500"></canvas>
+        <div style="margin-top:15px; font-size:12px; color:#64748b;">FLECHAS: Volar | ESPACIO: Fuego</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let audioCtx, player, boss, projectiles, enemyProjectiles, enemies, items, particles, score, gameActive, keys;
+        
+        // --- Lógica de High Score ---
+        let highScore = localStorage.getItem('motorIntelHighScore') || 0;
+        document.getElementById('highScoreDisplay').innerText = "RECORD: " + highScore;
+
+        function resetState() {
+            player = { x: 180, y: 430, w: 45, h: 35, speed: 7, color: '#64748b', fuel: 100 };
+            boss = { active: false, x: 150, y: -100, w: 100, h: 60, hp: 50, maxHp: 50, speedX: 2, dir: 1 };
+            projectiles = []; enemyProjectiles = []; enemies = []; items = []; score = 0;
+            gameActive = false; keys = {};
+        }
+
+        function initAudio() { if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        
+        function startGame() { 
+            resetState();
+            initAudio(); 
+            gameActive = true; 
+            document.getElementById('menu').style.display = 'none'; 
+            update(); 
+        }
+
+        function endGame(victory = false) {
+            gameActive = false;
+            const screen = document.getElementById('gameOverScreen');
+            const title = document.getElementById('gameOverTitle');
+            const finalScoreTxt = document.getElementById('finalScore');
+            const recordMsg = document.getElementById('recordMsg');
+            
+            screen.style.display = 'flex';
+            finalScoreTxt.innerText = "Puntos: " + score;
+            
+            if(victory) {
+                title.innerText = "¡VICTORIA!";
+                title.style.color = "#22c55e";
+            } else {
+                title.innerText = "¡MISIÓN FALLIDA!";
+                title.style.color = "#ef4444";
+            }
+
+            if(score >= highScore && score > 0) {
+                recordMsg.innerText = "¡NUEVO RÉCORD ESTABLECIDO!";
+            } else {
+                recordMsg.innerText = "";
+            }
+        }
+
+        function playSnd(f, d, t='square', v=0.05) { 
+            if(!audioCtx) return; 
+            let o = audioCtx.createOscillator(), g = audioCtx.createGain(); 
+            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime); 
+            o.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + d); 
+            g.gain.setValueAtTime(v, audioCtx.currentTime); 
+            o.connect(g); g.connect(audioCtx.destination); 
+            o.start(); o.stop(audioCtx.currentTime + d); 
+        }
+
+        window.addEventListener('keydown', e => { 
+            keys[e.code] = true; 
+            if(e.code === 'Space' && gameActive) { 
+                projectiles.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 12 }); 
+                playSnd(400, 0.1); 
+            } 
+        });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        function drawPlane(x, y, w, h, color, isEnemy=false) { 
+            ctx.fillStyle = color; ctx.fillRect(x, y + h/3, w, h/4); 
+            ctx.fillRect(x + w/2.4, y, w/5, h); 
+            ctx.fillStyle = "#1e293b"; ctx.fillRect(x + w/3.5, isEnemy ? y + h : y - 2, w/2, 3); 
+        }
+
+        function update() {
+            if(!gameActive) return; 
+            
+            player.fuel -= 0.08; 
+            document.getElementById('fuelBar').style.width = player.fuel + "%";
+            
+            if(player.fuel <= 0) { endGame(false); return; }
+
+            if(keys['ArrowLeft'] && player.x > 0) player.x -= player.speed; 
+            if(keys['ArrowRight'] && player.x < canvas.width - player.w) player.x += player.speed;
+            if(keys['ArrowUp'] && player.y > 0) player.y -= player.speed; 
+            if(keys['ArrowDown'] && player.y < canvas.height - player.h) player.y += player.speed;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if(score >= 50 && !boss.active) { 
+                boss.active = true; 
+                document.getElementById('bossBarContainer').style.display = 'block'; 
+                document.getElementById('levelDisplay').innerText = "LEYENDA"; 
+                player.color = "#ef4444"; 
+            }
+
+            if(boss.active) { 
+                if(boss.y < 50) boss.y++; 
+                boss.x += boss.speedX * boss.dir; 
+                if(boss.x <= 0 || boss.x >= canvas.width - boss.w) boss.dir *= -1; 
+                drawPlane(boss.x, boss.y, boss.w, boss.h, "#450a0a", true); 
+                document.getElementById('bossBar').style.width = (boss.hp/boss.maxHp*100) + "%"; 
+                if(Math.random() < 0.04) enemyProjectiles.push({x: boss.x + boss.w/2, y: boss.y + boss.h, w: 5, h: 10}); 
+            }
+            else if(Math.random() < 0.03) { 
+                enemies.push({ x: Math.random()*360, y: -40, w: 45, h: 35, s: 2 + (score/25) }); 
+            }
+
+            if(Math.random() < 0.01) items.push({ x: Math.random()*380, y: -20, w: 20, h: 20 });
+
+            enemyProjectiles.forEach((ep, i) => { 
+                ep.y += 5; ctx.fillStyle = "red"; ctx.fillRect(ep.x, ep.y, ep.w, ep.h); 
+                if(player.x < ep.x+ep.w && player.x+player.w > ep.x && player.y < ep.y+ep.h && player.y+player.h > ep.y) { endGame(false); } 
+            });
+
+            items.forEach((it, i) => { 
+                it.y += 2; ctx.fillStyle = "#facc15"; ctx.fillRect(it.x, it.y, it.w, it.h); 
+                if(player.x < it.x+it.w && player.x+player.w > it.x && player.y < it.y+it.h && player.y+player.h > it.y) { 
+                    player.fuel = Math.min(100, player.fuel+35); items.splice(i, 1); playSnd(600, 0.1, 'sine'); 
+                } 
+            });
+
+            projectiles.forEach((p, i) => { 
+                p.y -= 10; ctx.fillStyle = "white"; ctx.fillRect(p.x, p.y, p.w, p.h); 
+                if(boss.active && p.x < boss.x+boss.w && p.x+p.w > boss.x && p.y < boss.y+boss.h && p.y+p.h > boss.y) { 
+                    boss.hp--; projectiles.splice(i, 1); 
+                    if(boss.hp <= 0) { endGame(true); } 
+                } 
+            });
+
+            enemies.forEach((en, i) => { 
+                en.y += en.s; 
+                drawPlane(en.x, en.y, en.w, en.h, "#1e293b", true); 
+                if(player.x < en.x+en.w && player.x+player.w > en.x && player.y < en.y+en.h && player.y+player.h > en.y) { endGame(false); }
+                projectiles.forEach((p, pi) => { 
+                    if(p.x < en.x+en.w && p.x+p.w > en.x && p.y < en.y+en.h && p.y+p.h > en.y) { 
+                        enemies.splice(i, 1); projectiles.splice(pi, 1); 
+                        score++; 
+                        document.getElementById('scoreDisplay').innerText = "SCORE: " + score;
+                        if(score > highScore) {
+                            highScore = score;
+                            localStorage.setItem('motorIntelHighScore', highScore);
+                            document.getElementById('highScoreDisplay').innerText = "RECORD: " + highScore;
+                        }
+                        playSnd(200, 0.1, 'sawtooth', 0.02); 
+                    } 
+                });
+            });
+
+            drawPlane(player.x, player.y, player.w, player.h, player.color);
+            if(gameActive) requestAnimationFrame(update);
+        }
+        resetState();
+    </script>
+</body>
+</html>
